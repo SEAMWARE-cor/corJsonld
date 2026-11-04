@@ -17,7 +17,9 @@
 #include "corJsonld/CorLdContext.h"                     // CorLdContext
 #include "corJsonld/corLdTraceLevels.h"                // CorLdTExpand
 #include "corJsonld/corLdInit.h"                       // corLdCoreContext, corLdCoreItemById
-#include "corJsonld/corLdExpand.h"                     // corLdExpand
+#include "corJsonld/corLdExpand.h"                     // corLdExpand, corLdAlreadyExpanded
+#include "corJsonld/corLdPrefixExpand.h"               // corLdPrefixExpand
+#include "corHash/corHash.h"                         // corHashItemLookup
 #include "corJsonld/corLdContextParse.h"               // corLdContextFromTree
 #include "corJsonld/corLdExpandTree.h"                 // Own interface
 
@@ -27,6 +29,60 @@
 //
 // expandObject - recursively expand all names inside an object
 //
+// -----------------------------------------------------------------------------
+//
+// vocabValueIsTerm - do the values of this @type:@vocab member name a vocabulary term, not a name?
+//
+// The core @context types nineteen terms @vocab. Fifteen of them hold the NAMES of attributes or
+// entity types (watchedAttributes, attributeNames, typeNames, propertyNames, ...): their values are
+// compared with keys, and a key that is a core term is held short (coreContextRewriteToShort), so
+// those values stay in the same, short, form. The other four hold a term of a vocabulary - the
+// @type of a value, the type of a Relationship's object, a VocabProperty's value - and such a value
+// is expanded as the core @context says: `langString` is rdf's IRI, not the short name.
+//
+static bool vocabValueIsTerm(const char* termName)
+{
+  if (termName == NULL)
+    return false;
+
+  return ((strcmp(termName, "valueType")     == 0) ||
+          (strcmp(termName, "objectType")    == 0) ||
+          (strcmp(termName, "vocab")         == 0) ||
+          (strcmp(termName, "previousVocab") == 0));
+}
+
+
+
+// -----------------------------------------------------------------------------
+//
+// coreTermIri - the IRI the core @context gives a core term (shortName), from its pristine copy
+//
+// The working core context knows no IRI of its own terms (coreContextRewriteToShort sets every id
+// to the term's name), the pristine one does. An id written as a compact IRI (ngsi-ld:Property) is
+// expanded through its prefix. A term the pristine copy lacks is returned as it is.
+//
+static char* coreTermIri(char* shortName, CorAlloc* kaP)
+{
+  CorLdContext* pristineP = corLdCorePristine();
+
+  if ((pristineP == NULL) || (pristineP->nameHT == NULL))
+    return shortName;
+
+  CorLdItem* itemP = (CorLdItem*) corHashItemLookup(pristineP->nameHT, shortName);
+
+  if ((itemP == NULL) || (itemP->id == NULL))
+    return shortName;
+
+  if (corLdAlreadyExpanded(itemP->id) == true)
+    return (char*) itemP->id;
+
+  char* iri = corLdPrefixExpand(pristineP, itemP->id, kaP);
+
+  return (iri != NULL) ? iri : shortName;
+}
+
+
+
 // -----------------------------------------------------------------------------
 //
 // vocabValueExpand - expand one value of an @type:@vocab term
@@ -40,7 +96,15 @@ static char* vocabValueExpand(CorLdContext* contextP, CorLdItem* termItemP, char
   int                   ix       = (suffixFn != NULL) ? suffixFn(termItemP->name, value) : -1;
 
   if (ix <= 0)
-    return corLdExpand(contextP, value, kaP, NULL, NULL);
+  {
+    bool  core     = false;
+    char* expanded = corLdExpand(contextP, value, kaP, NULL, &core);
+
+    if ((core == true) && (expanded != NULL) && (vocabValueIsTerm(termItemP->name) == true))
+      return coreTermIri(expanded, kaP);
+
+    return expanded;
+  }
 
   char* termP = (char*) corAlloc(kaP, ix + 1);
   memcpy(termP, value, ix);
@@ -58,6 +122,26 @@ static char* vocabValueExpand(CorLdContext* contextP, CorLdItem* termItemP, char
   memcpy(&outP[expandedLen], &value[ix], suffixLen + 1);
 
   return outP;
+}
+
+
+
+// -----------------------------------------------------------------------------
+//
+// corLdVocabValueExpand - a value of the @type:@vocab member termName, expanded as it is stored
+//
+// For whoever holds such a value outside a tree - a q value compared with the stored one. Same
+// rule as the tree's: a vocabulary term that is a core term gets the core @context's IRI.
+//
+char* corLdVocabValueExpand(CorLdContext* contextP, const char* termName, char* value, CorAlloc* kaP)
+{
+  bool  core     = false;
+  char* expanded = corLdExpand(contextP, value, kaP, NULL, &core);
+
+  if ((core == true) && (expanded != NULL) && (vocabValueIsTerm(termName) == true))
+    return coreTermIri(expanded, kaP);
+
+  return expanded;
 }
 
 

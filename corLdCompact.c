@@ -238,7 +238,7 @@ static const char* prefixCompactBuild(const char* iri, const char* name, int idL
   return out;
 }
 
-static const char* prefixCompact(CorLdContext* contextP, const char* iri, CorAlloc* kaP)
+static const char* prefixCompact(CorLdContext* contextP, const char* iri, bool userOnly, CorAlloc* kaP)
 {
   // Phase 1: scan user-context nameHT (not subject to the core-context
   // rewrite — prefix terms there still hold their full IRIs).
@@ -249,7 +249,7 @@ static const char* prefixCompact(CorLdContext* contextP, const char* iri, CorAll
   // Phase 2: scan the pre-rewrite snapshot of the core context. Pick
   // longest-match between user and core combined.
   int          coreN = 0;
-  const CorLdCorePrefix* coreV = corLdCorePrefixes(&coreN);
+  const CorLdCorePrefix* coreV = (userOnly == true) ? NULL : corLdCorePrefixes(&coreN);
   const CorLdCorePrefix* coreBest = NULL;
   for (int i = 0; i < coreN; i++)
   {
@@ -332,8 +332,23 @@ const char* corLdCompact(CorLdContext* contextP, const char* iri, CorAlloc* kaP)
   //
   if (shadowed)
   {
-    result = prefixCompact(contextP, iri, kaP);
+    result = prefixCompact(contextP, iri, false, kaP);
     if (result != NULL)
+      return result;
+  }
+
+  //
+  // Step 5b: Compact-IRI with a prefix of a USER context - always. An IRI the request's @context expanded
+  // through one of its prefixes (`ex:Other` -> http://example.org/types/Other) comes back in that form, as
+  // JSON-LD compaction gives it. The core context's prefixes stay behind the step-5 guard: they would re-shape
+  // core IRIs nobody wrote as compact IRIs (`ngsi-ld:errors/...`). A compact IRI that a user term of the
+  // same name maps elsewhere would not expand back, so it is not used.
+  //
+  result = prefixCompact(contextP, iri, true, kaP);
+  if (result != NULL)
+  {
+    CorLdItem* termP = contextNameLookup(contextP, result);
+    if ((termP == NULL) || (termP->id == NULL) || (strcmp(termP->id, iri) == 0))
       return result;
   }
 

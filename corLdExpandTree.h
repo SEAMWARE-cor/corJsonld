@@ -47,4 +47,16 @@ extern CorLdContext* corLdExpandTree(CorNode* treeP, CorLdContext* userContextP,
 //
 extern CorLdContext* corLdExpandEntityTree(CorNode* treeP, CorLdContext* userContextP, CorAlloc* kaP);
 
+// -----------------------------------------------------------------------------
+//
+// corLdVocabValueExpand - a value of the @type:@vocab member termName, expanded as it is stored
+//
+// valueType, objectType, vocab and previousVocab hold vocabulary terms: a core term among them gets
+// the core @context's IRI. Every other @vocab member holds a name, expanded like a key (short, for
+// a core term).
+//
+extern char* corLdVocabValueExpand(CorLdContext* contextP, const char* termName, char* value, CorAlloc* kaP);
+
+
+
 #endif  // CORLD_EXPAND_TREE_H
